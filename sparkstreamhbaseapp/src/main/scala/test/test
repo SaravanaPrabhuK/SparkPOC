@@ -1,0 +1,111 @@
+package com.cisco.cstg.sntl.chm;
+
+import java.util.List;
+
+import org.apache.log4j.Logger;
+import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.function.Function;
+import org.apache.spark.streaming.Duration;
+import org.apache.spark.streaming.api.java.JavaDStream;
+import org.apache.spark.streaming.api.java.JavaStreamingContext;
+
+public class StatsProcessor {
+	
+	private static Logger LOGGER = Logger.getLogger(StatsProcessor.class);
+	
+/*	private lazy val schema = StructType(
+		      StructField("name", StringType) ::
+		      StructField("id", IntegerType) :: Nil)
+	
+		      */
+	
+	public static void main(String[] args) {
+		
+		LOGGER.info("*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*");
+		
+		System.setProperty("hadoop.home.dir", "C:\\tools\\hadoop\\");
+		System.setProperty("oracle.jdbc.Trace", "true");
+		
+		Integer duration = Integer.parseInt(args[0]);
+		String statsServiceInputDir = args[1];
+		String dataStatsServiceInputDir = statsServiceInputDir + "/dataStats";
+		
+		LOGGER.info("Starting StatsService...");
+		startStatsService(duration, statsServiceInputDir, dataStatsServiceInputDir);
+
+	}
+
+	private static void startStatsService(int duration, String statsServiceInputDir, String dataStatsServiceInputDir) {
+		
+		SparkConf sparkConf = new SparkConf().setAppName("Collector Health Stats Service");
+		
+		JavaStreamingContext streamingContext = new JavaStreamingContext(sparkConf, new Duration(duration * 1000));
+	
+		JavaDStream<String> textFileStream = streamingContext.textFileStream(statsServiceInputDir);
+		//textFileStream.cache();
+		
+		textFileStream.foreachRDD(new Function<JavaRDD<String>,Void>() {
+			@Override
+			public Void call(JavaRDD<String> textRDD) throws Exception {
+								
+				List<String> data = textRDD.collect();
+				Persistence persistence = null;
+				
+				if (data.isEmpty()) {
+					LOGGER.info("*-*-*-*-*-* No new stats data... ");
+				} else {
+					
+					LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! New data: " + data);
+					
+					for (String statsJSON:data) {
+					
+						persistence = new Persistence();
+				
+						persistence.saveStats(statsJSON);
+					
+					}
+				}
+				
+				return null;
+				
+			}
+		});
+		
+		JavaDStream<String> dataStatsFileStream = streamingContext.textFileStream(dataStatsServiceInputDir);
+		//dataStatsFileStream.cache();
+		
+		dataStatsFileStream.foreachRDD(new Function<JavaRDD<String>,Void>() {
+			@Override
+			public Void call(JavaRDD<String> textRDD) throws Exception {
+								
+				List<String> data = textRDD.collect();
+				Persistence persistence = null;
+				
+				if (data.isEmpty()) {
+					LOGGER.info("*-*-*-*-*-* No new data-stats data... ");
+				} else {
+					
+					LOGGER.info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! New data-stats data: " + data);
+					
+					for (String dataStats:data) {
+					
+						persistence = new Persistence();
+				
+						persistence.saveDataStats(dataStats);
+					
+					}
+				}
+				
+				return null;
+				
+			}
+		});
+		
+		streamingContext.start();
+		streamingContext.awaitTermination();
+		streamingContext.close();
+	
+	}
+	
+}
